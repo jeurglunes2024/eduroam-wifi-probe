@@ -1,0 +1,785 @@
+{
+  "uid": "eduroam-rf",
+  "title": "eduroam RF Survey",
+  "description": "Everything the probe can hear at a location.",
+  "tags": [
+    "eduroam"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": [
+        "eduroam"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "title": "eduroam dashboards"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "location",
+        "label": "Location",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "eduroam-influx"
+        },
+        "hide": 0,
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"eduroam\", tag: \"location\", start: -90d, predicate: (r) => r._measurement == \"wifi_scan\")",
+        "definition": "location tag values",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "ssid",
+        "label": "SSID",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "eduroam-influx"
+        },
+        "hide": 0,
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"eduroam\", tag: \"ssid\", start: -90d, predicate: (r) => r._measurement == \"wifi_scan\")",
+        "definition": "ssid tag values",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Summary (latest scan at the selected location)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Networks (BSSIDs) heard",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> count(column: \"signal_dbm\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "eduroam radios heard",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r.ssid == \"eduroam\")\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> count(column: \"signal_dbm\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "eduroam radios usable (>= -75 dBm)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r.ssid == \"eduroam\")\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> filter(fn: (r) => r.signal_dbm >= -75.0)\n  |> count(column: \"signal_dbm\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Busiest eduroam channel",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r.ssid == \"eduroam\")\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> max(column: \"channel_util_pct\")\n  |> keep(columns: [\"channel_util_pct\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 75
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Channels",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Networks per channel (all SSIDs)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> group(columns: [\"band\", \"channel\"])\n  |> count(column: \"signal_dbm\")\n  |> rename(columns: {signal_dbm: \"_value\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "displayName": "${__field.labels.band} GHz ch ${__field.labels.channel}",
+          "min": 0,
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "How crowded each channel is. Every network on a channel shares its airtime."
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Channel utilization reported by eduroam APs",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r.ssid == \"eduroam\")\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> filter(fn: (r) => exists r.channel_util_pct)\n  |> group(columns: [\"band\", \"channel\"])\n  |> max(column: \"channel_util_pct\")\n  |> rename(columns: {channel_util_pct: \"_value\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "displayName": "${__field.labels.band} GHz ch ${__field.labels.channel}",
+          "min": 0,
+          "decimals": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 75
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Networks heard",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Latest scan, strongest first",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r.ssid =~ /^${ssid:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> keep(columns: [\"ssid\", \"ap_name\", \"building\", \"band\", \"channel\", \"signal_dbm\", \"channel_util_pct\", \"station_count\", \"wifi_gen\", \"bssid\", \"_time\"])\n  |> sort(columns: [\"signal_dbm\"], desc: true)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ssid"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "SSID"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ap_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "AP"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "building"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "building"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "band"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "GHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "channel"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "ch"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "signal_dbm"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "signal"
+              },
+              {
+                "id": "unit",
+                "value": "dBm"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": -75
+                    },
+                    {
+                      "color": "green",
+                      "value": -67
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "channel_util_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "ch util"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 50
+                    },
+                    {
+                      "color": "red",
+                      "value": 75
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "station_count"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "clients"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 30
+                    },
+                    {
+                      "color": "red",
+                      "value": 60
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "wifi_gen"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "gen"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bssid"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "BSSID"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "_time"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "last tested"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Signal over time by BSSID",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and r._field == \"signal_dbm\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r.ssid =~ /^${ssid:regex}$/)\n  |> group(columns: [\"ap_name\", \"band\", \"bssid\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBm",
+          "displayName": "${__field.labels.ap_name} ${__field.labels.band} GHz",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "always",
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -75
+              },
+              {
+                "color": "green",
+                "value": -67
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}

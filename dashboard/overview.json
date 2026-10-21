@@ -1,0 +1,1975 @@
+{
+  "uid": "eduroam-overview",
+  "title": "eduroam Overview",
+  "description": "What is broken right now across every AP the probe has tested.",
+  "tags": [
+    "eduroam"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": [
+        "eduroam"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "title": "eduroam dashboards"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "location",
+        "label": "Location",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "eduroam-influx"
+        },
+        "hide": 0,
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"eduroam\", tag: \"location\", start: -90d, predicate: (r) => r._measurement == \"wifi_test\")",
+        "definition": "location tag values",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Health (latest test of each AP)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "APs tested",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"success\" and exists r.ap_group)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group(columns: [\"ap_group\"])\n  |> last()\n  |> group()\n  |> count()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "APs fully healthy",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"success\", \"fail_reason\", \"scan_signal_dbm\", \"channel_util_pct\", \"station_count\", \"l2_total_ms\", \"eap_ms\", \"dhcp_ms\", \"gw_rtt_avg_ms\", \"gw_loss_pct\", \"inet_loss_pct\", \"dns1_ms\", \"http_total_ms\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> map(fn: (r) => ({r with\n        ap_name: if exists r.ap_name then r.ap_name else r.ap_group,\n        building: if exists r.building then r.building else \"\",\n        ok_i: if exists r.success and r.success then 1 else 0,\n        conn: if exists r.l2_total_ms then r.l2_total_ms else 0.0,\n        dhcp: if exists r.dhcp_ms then r.dhcp_ms else 0.0,\n        loss: if exists r.gw_loss_pct then r.gw_loss_pct else 0.0,\n        sig: if exists r.scan_signal_dbm then r.scan_signal_dbm else -200.0,\n        util: if exists r.channel_util_pct then r.channel_util_pct else 0.0,\n        sta: if exists r.station_count then r.station_count else 0,\n        bad: if exists r.success and r.success then \"\"\n             else r.band + \" GHz: \" + (if exists r.fail_stage then r.fail_stage else \"unknown\") + \"  \",\n        t: int(v: r._time)}))\n  |> group(columns: [\"ap_name\", \"building\"])\n  |> reduce(\n      identity: {radios: 0, radios_ok: 0, worst_connect_ms: 0.0, worst_dhcp_ms: 0.0, worst_gw_loss_pct: 0.0,\n                 best_signal_dbm: -200.0, max_util_pct: 0.0, clients: 0, failing: \"\", last_t: 0},\n      fn: (r, accumulator) => ({\n          radios: accumulator.radios + 1,\n          radios_ok: accumulator.radios_ok + r.ok_i,\n          worst_connect_ms: if r.conn > accumulator.worst_connect_ms then r.conn else accumulator.worst_connect_ms,\n          worst_dhcp_ms: if r.dhcp > accumulator.worst_dhcp_ms then r.dhcp else accumulator.worst_dhcp_ms,\n          worst_gw_loss_pct: if r.loss > accumulator.worst_gw_loss_pct then r.loss else accumulator.worst_gw_loss_pct,\n          best_signal_dbm: if r.sig > accumulator.best_signal_dbm then r.sig else accumulator.best_signal_dbm,\n          max_util_pct: if r.util > accumulator.max_util_pct then r.util else accumulator.max_util_pct,\n          clients: accumulator.clients + r.sta,\n          failing: accumulator.failing + r.bad,\n          last_t: if r.t > accumulator.last_t then r.t else accumulator.last_t}))\n  |> map(fn: (r) => ({r with\n        status: if r.radios_ok == r.radios then \"OK\" else if r.radios_ok == 0 then \"DOWN\" else \"DEGRADED\",\n        rank: if r.radios_ok == 0 then 0 else if r.radios_ok < r.radios then 1 else 2,\n        radios_ok_text: string(v: r.radios_ok) + \"/\" + string(v: r.radios),\n        last_tested: time(v: r.last_t)}))\n  |> group()\n  |> map(fn: (r) => ({r with _value: if r.radios_ok == r.radios then 100.0 else 0.0}))\n  |> mean()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Share of APs whose every tested radio passed its latest test."
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "APs with a problem",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"success\", \"fail_reason\", \"scan_signal_dbm\", \"channel_util_pct\", \"station_count\", \"l2_total_ms\", \"eap_ms\", \"dhcp_ms\", \"gw_rtt_avg_ms\", \"gw_loss_pct\", \"inet_loss_pct\", \"dns1_ms\", \"http_total_ms\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> map(fn: (r) => ({r with\n        ap_name: if exists r.ap_name then r.ap_name else r.ap_group,\n        building: if exists r.building then r.building else \"\",\n        ok_i: if exists r.success and r.success then 1 else 0,\n        conn: if exists r.l2_total_ms then r.l2_total_ms else 0.0,\n        dhcp: if exists r.dhcp_ms then r.dhcp_ms else 0.0,\n        loss: if exists r.gw_loss_pct then r.gw_loss_pct else 0.0,\n        sig: if exists r.scan_signal_dbm then r.scan_signal_dbm else -200.0,\n        util: if exists r.channel_util_pct then r.channel_util_pct else 0.0,\n        sta: if exists r.station_count then r.station_count else 0,\n        bad: if exists r.success and r.success then \"\"\n             else r.band + \" GHz: \" + (if exists r.fail_stage then r.fail_stage else \"unknown\") + \"  \",\n        t: int(v: r._time)}))\n  |> group(columns: [\"ap_name\", \"building\"])\n  |> reduce(\n      identity: {radios: 0, radios_ok: 0, worst_connect_ms: 0.0, worst_dhcp_ms: 0.0, worst_gw_loss_pct: 0.0,\n                 best_signal_dbm: -200.0, max_util_pct: 0.0, clients: 0, failing: \"\", last_t: 0},\n      fn: (r, accumulator) => ({\n          radios: accumulator.radios + 1,\n          radios_ok: accumulator.radios_ok + r.ok_i,\n          worst_connect_ms: if r.conn > accumulator.worst_connect_ms then r.conn else accumulator.worst_connect_ms,\n          worst_dhcp_ms: if r.dhcp > accumulator.worst_dhcp_ms then r.dhcp else accumulator.worst_dhcp_ms,\n          worst_gw_loss_pct: if r.loss > accumulator.worst_gw_loss_pct then r.loss else accumulator.worst_gw_loss_pct,\n          best_signal_dbm: if r.sig > accumulator.best_signal_dbm then r.sig else accumulator.best_signal_dbm,\n          max_util_pct: if r.util > accumulator.max_util_pct then r.util else accumulator.max_util_pct,\n          clients: accumulator.clients + r.sta,\n          failing: accumulator.failing + r.bad,\n          last_t: if r.t > accumulator.last_t then r.t else accumulator.last_t}))\n  |> map(fn: (r) => ({r with\n        status: if r.radios_ok == r.radios then \"OK\" else if r.radios_ok == 0 then \"DOWN\" else \"DEGRADED\",\n        rank: if r.radios_ok == 0 then 0 else if r.radios_ok < r.radios then 1 else 2,\n        radios_ok_text: string(v: r.radios_ok) + \"/\" + string(v: r.radios),\n        last_tested: time(v: r.last_t)}))\n  |> group()\n  |> filter(fn: (r) => r.radios_ok < r.radios)\n  |> count(column: \"radios\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "APs where at least one radio failed its latest test (DEGRADED or DOWN)."
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Radios failing now",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"success\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> group()\n  |> filter(fn: (r) => r._value == false)\n  |> count()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Tests run",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"success\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group()\n  |> count()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Success rate (all tests)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"success\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> map(fn: (r) => ({r with _value: if r._value then 100.0 else 0.0}))\n  |> group()\n  |> mean()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Shared services (median across all APs; red everywhere means it is not the APs)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Login / RADIUS (EAP)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"eap_ms\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group()\n  |> median()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 3000
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Time for the RADIUS servers to authenticate. Slow on every AP = RADIUS or directory problem."
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "DHCP",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"dhcp_ms\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group()\n  |> median()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2000
+              },
+              {
+                "color": "red",
+                "value": 5000
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Time to get an IP address. Slow or failing in one building = that scope or relay."
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "DNS",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"dns1_ms\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group()\n  |> median()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Lookup time against the DHCP-assigned resolver."
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "HTTPS",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"http_total_ms\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group()\n  |> median()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 3000
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Full HTTPS request to the test URL."
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "Access points, worst first (click an AP name for its per-band detail)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "Latest status per AP",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"success\", \"fail_reason\", \"scan_signal_dbm\", \"channel_util_pct\", \"station_count\", \"l2_total_ms\", \"eap_ms\", \"dhcp_ms\", \"gw_rtt_avg_ms\", \"gw_loss_pct\", \"inet_loss_pct\", \"dns1_ms\", \"http_total_ms\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> map(fn: (r) => ({r with\n        ap_name: if exists r.ap_name then r.ap_name else r.ap_group,\n        building: if exists r.building then r.building else \"\",\n        ok_i: if exists r.success and r.success then 1 else 0,\n        conn: if exists r.l2_total_ms then r.l2_total_ms else 0.0,\n        dhcp: if exists r.dhcp_ms then r.dhcp_ms else 0.0,\n        loss: if exists r.gw_loss_pct then r.gw_loss_pct else 0.0,\n        sig: if exists r.scan_signal_dbm then r.scan_signal_dbm else -200.0,\n        util: if exists r.channel_util_pct then r.channel_util_pct else 0.0,\n        sta: if exists r.station_count then r.station_count else 0,\n        bad: if exists r.success and r.success then \"\"\n             else r.band + \" GHz: \" + (if exists r.fail_stage then r.fail_stage else \"unknown\") + \"  \",\n        t: int(v: r._time)}))\n  |> group(columns: [\"ap_name\", \"building\"])\n  |> reduce(\n      identity: {radios: 0, radios_ok: 0, worst_connect_ms: 0.0, worst_dhcp_ms: 0.0, worst_gw_loss_pct: 0.0,\n                 best_signal_dbm: -200.0, max_util_pct: 0.0, clients: 0, failing: \"\", last_t: 0},\n      fn: (r, accumulator) => ({\n          radios: accumulator.radios + 1,\n          radios_ok: accumulator.radios_ok + r.ok_i,\n          worst_connect_ms: if r.conn > accumulator.worst_connect_ms then r.conn else accumulator.worst_connect_ms,\n          worst_dhcp_ms: if r.dhcp > accumulator.worst_dhcp_ms then r.dhcp else accumulator.worst_dhcp_ms,\n          worst_gw_loss_pct: if r.loss > accumulator.worst_gw_loss_pct then r.loss else accumulator.worst_gw_loss_pct,\n          best_signal_dbm: if r.sig > accumulator.best_signal_dbm then r.sig else accumulator.best_signal_dbm,\n          max_util_pct: if r.util > accumulator.max_util_pct then r.util else accumulator.max_util_pct,\n          clients: accumulator.clients + r.sta,\n          failing: accumulator.failing + r.bad,\n          last_t: if r.t > accumulator.last_t then r.t else accumulator.last_t}))\n  |> map(fn: (r) => ({r with\n        status: if r.radios_ok == r.radios then \"OK\" else if r.radios_ok == 0 then \"DOWN\" else \"DEGRADED\",\n        rank: if r.radios_ok == 0 then 0 else if r.radios_ok < r.radios then 1 else 2,\n        radios_ok_text: string(v: r.radios_ok) + \"/\" + string(v: r.radios),\n        last_tested: time(v: r.last_t)}))\n  |> group()\n  |> sort(columns: [\"rank\", \"ap_name\"])\n  |> keep(columns: [\"status\", \"ap_name\", \"building\", \"radios_ok_text\", \"failing\", \"best_signal_dbm\", \"worst_connect_ms\", \"worst_dhcp_ms\", \"worst_gw_loss_pct\", \"max_util_pct\", \"clients\", \"last_tested\"])\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "DEGRADED": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "DOWN": {
+                        "color": "red",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ap_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "AP"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open this AP",
+                    "url": "/d/eduroam-ap/eduroam-access-point?var-ap=${__value.raw}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "radios_ok_text"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "radios OK"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failing"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "failing radios (stage)"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "best_signal_dbm"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "best signal"
+              },
+              {
+                "id": "unit",
+                "value": "dBm"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": -75
+                    },
+                    {
+                      "color": "green",
+                      "value": -67
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "-",
+                        "index": 0
+                      },
+                      "-200": {
+                        "text": "-",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "worst_connect_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "worst connect"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1000
+                    },
+                    {
+                      "color": "red",
+                      "value": 3000
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "-",
+                        "index": 0
+                      },
+                      "-200": {
+                        "text": "-",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "worst_dhcp_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "worst DHCP"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 2000
+                    },
+                    {
+                      "color": "red",
+                      "value": 5000
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "-",
+                        "index": 0
+                      },
+                      "-200": {
+                        "text": "-",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "worst_gw_loss_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "worst gateway loss"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max_util_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "peak ch util"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 50
+                    },
+                    {
+                      "color": "red",
+                      "value": 75
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "-",
+                        "index": 0
+                      },
+                      "-200": {
+                        "text": "-",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "clients"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "clients (all radios)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last_tested"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "last tested"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "description": "One row per physical AP, combining the newest test of each of its radios. DEGRADED = some radios failing, DOWN = all failing. Open the AP for per-band detail."
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Wi-Fi security (passive: what each network advertises)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Networks with findings",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"flag_count\", \"insecure\", \"security_flags\", \"auth_suites\", \"wps\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> filter(fn: (r) => r.insecure == 1)\n  |> count(column: \"insecure\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Scanned BSSIDs carrying at least one security flag."
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Rogue eduroam suspects",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 23,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"flag_count\", \"insecure\", \"security_flags\", \"auth_suites\", \"wps\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> filter(fn: (r) => exists r.security_flags and (r.security_flags =~ /rogue_enc/ or r.security_flags =~ /unknown_vendor/))\n  |> count(column: \"insecure\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "eduroam BSSIDs that are not WPA-Enterprise, or whose MAC vendor is not in KNOWN_OUIS. Investigate these: they may be impersonating eduroam."
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Certificate mismatches",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 23,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"fail_reason\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => r._value =~ /tls_cert_error/)\n  |> group()\n  |> count()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "Logins where the RADIUS server certificate did not match the pinned one. A renewed cert, or an impersonator."
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "eduroam radios without PMF",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 23,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and r._field == \"signal_dbm\" and r.ssid == \"eduroam\" and r.pmf == \"off\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group(columns: [\"bssid\"])\n  |> last()\n  |> group()\n  |> count()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "eduroam radios with protected management frames (802.11w) off. Without PMF, forged disconnect frames can knock users off."
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Security findings (latest scan per BSSID)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_scan\" and exists r.bssid)\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"signal_dbm\", \"flag_count\", \"insecure\", \"security_flags\", \"auth_suites\", \"wps\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group(columns: [\"bssid\"])\n  |> sort(columns: [\"_time\"])\n  |> last(column: \"_time\")\n  |> group()\n  |> filter(fn: (r) => r.flag_count > 0)\n  |> keep(columns: [\"ssid\", \"ap_name\", \"building\", \"band\", \"channel\", \"security\", \"pmf\", \"wps\", \"security_flags\", \"auth_suites\", \"signal_dbm\", \"bssid\", \"_time\"])\n  |> sort(columns: [\"ssid\", \"signal_dbm\"], desc: true)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ssid"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "SSID"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ap_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "AP"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "building"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "building"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "band"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "GHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "channel"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "ch"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "signal_dbm"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "signal"
+              },
+              {
+                "id": "unit",
+                "value": "dBm"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": -75
+                    },
+                    {
+                      "color": "green",
+                      "value": -67
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bssid"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "BSSID"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "_time"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "last tested"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "security_flags"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "flags"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "security"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".*enterprise",
+                      "result": {
+                        "color": "dark-green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "open": {
+                        "color": "dark-red",
+                        "index": 1
+                      },
+                      "wep": {
+                        "color": "dark-red",
+                        "index": 2
+                      },
+                      "wpa1": {
+                        "color": "dark-red",
+                        "index": 3
+                      },
+                      "wpa2-personal": {
+                        "color": "dark-orange",
+                        "index": 4
+                      },
+                      "wpa2/3-personal": {
+                        "color": "dark-orange",
+                        "index": 5
+                      },
+                      "wpa3-personal": {
+                        "color": "dark-orange",
+                        "index": 6
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pmf"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "off": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "capable": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "required": {
+                        "color": "green",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "description": "Every network (any SSID) carrying a security flag, from its most recent scan. rogue_enc / unknown_vendor on an eduroam row is the one to act on first."
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Failures",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Failures over time, by stage",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r._field == \"success\" and r.result == \"fail\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> group(columns: [\"fail_stage\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: count, createEmpty: false)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "displayName": "${__field.labels.fail_stage}",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "always",
+            "fillOpacity": 60,
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Stacked count of failed tests by the stage they failed at."
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Recent failures",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "eduroam-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "eduroam-influx"
+          },
+          "query": "from(bucket: \"eduroam\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"wifi_test\" and r.result == \"fail\")\n  |> filter(fn: (r) => r.location =~ /^${location:regex}$/)\n  |> filter(fn: (r) => contains(value: r._field, set: [\"fail_reason\", \"scan_signal_dbm\", \"deauth_reason\"]))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> keep(columns: [\"_time\", \"ap_name\", \"band\", \"fail_stage\", \"fail_reason\", \"deauth_reason\", \"scan_signal_dbm\", \"location\"])\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 100)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "_time"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "last tested"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ap_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "AP"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "band"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "GHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fail_stage"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "failed at"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "scan": {
+                        "text": "not visible",
+                        "index": 0
+                      },
+                      "association": {
+                        "text": "association (AP)",
+                        "index": 1
+                      },
+                      "authentication": {
+                        "text": "login (RADIUS)",
+                        "index": 2
+                      },
+                      "handshake": {
+                        "text": "handshake (AP)",
+                        "index": 3
+                      },
+                      "dhcp": {
+                        "text": "DHCP",
+                        "index": 4
+                      },
+                      "dns": {
+                        "text": "DNS",
+                        "index": 5
+                      },
+                      "http": {
+                        "text": "HTTPS",
+                        "index": 6
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fail_reason"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "reason"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "deauth_reason"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "deauth code"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "scan_signal_dbm"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "signal"
+              },
+              {
+                "id": "unit",
+                "value": "dBm"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": -75
+                    },
+                    {
+                      "color": "green",
+                      "value": -67
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "location"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "location"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    }
+  ]
+}

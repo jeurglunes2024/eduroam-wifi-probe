@@ -1,0 +1,21 @@
+# Runtime secrets and data — never commit these (they live on the Pi, not in git)
+probe.env
+influx.env
+*.token
+radius-ca.pem
+*.pem
+
+# Probe output
+results/
+logs/
+pcap/
+pending/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+*.swp

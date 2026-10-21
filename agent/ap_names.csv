@@ -1,0 +1,8 @@
+# AP names for the eduroam probe. Copy to /etc/eduroam-probe/ap_names.csv and edit.
+# id,name,building
+#   id: an AP group (first five octets, names every radio on that AP, e.g. aa:bb:cc:10:d9)
+#       or a single BSSID (e.g. aa:bb:cc:10:d9:cd) to name just one radio.
+#   Get ids from: sudo eduroam-probe scan
+# Examples (remove the leading # to use):
+# aa:bb:cc:10:d9,Library 2F hallway,Library
+# aa:bb:cc:10:bc,Library 2F room 210,Library

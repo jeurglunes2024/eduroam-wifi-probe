@@ -1,0 +1,14 @@
+#!/bin/sh
+# eduroam-probe-run - wrapper used by the systemd services.
+# Serializes probe runs with a lock so the 1-minute scan and the 15-minute
+# full test never drive wlan0 at the same time. If a run is already in
+# progress, this tick is skipped cleanly (exit 0) instead of failing.
+set -u
+LOCK=/run/eduroam-probe.lock
+rc=0
+flock -n --conflict-exit-code 75 "$LOCK" /usr/local/bin/eduroam-probe run "$@" || rc=$?
+if [ "$rc" -eq 75 ]; then
+    echo "eduroam-probe: another run is in progress, skipping this tick"
+    exit 0
+fi
+exit "$rc"
