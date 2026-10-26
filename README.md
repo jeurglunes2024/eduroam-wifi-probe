@@ -133,6 +133,7 @@ DNS_TEST_HOST=www.google.com
 HTTP_TEST_URL=https://www.google.com/generate_204
 PING_TARGET=8.8.8.8
 # IPERF_SERVER=iperf.your-institution.edu    # optional throughput tests
+CAPTURE_RAW=1                           # store full raw scan text per AP (set 0 to disable)
 ```
 
 ### Password handling
@@ -154,10 +155,18 @@ sudo eduroam-probe run --location "Library 2F" --repeat 5 --interval 60
 A full run scans and tests every eduroam radio at or above the signal floor, strongest first. A run stops early if the server rejects your credentials, so a typo can't lock your account. Set `PROBE_WPA_DEBUG=1` (`sudo PROBE_WPA_DEBUG=1 eduroam-probe run ...`) to save full wpa_supplicant debug output in the logs. For each radio it measures association, EAP authentication, 4-way handshake, DHCP, gateway and internet ping, DNS, HTTPS, link statistics, IPv6, and optionally iperf3. Results go to InfluxDB and to `/var/lib/eduroam-probe/results/` as JSON. Raw wpa_supplicant logs are kept per test in `/var/lib/eduroam-probe/logs/`. If InfluxDB is unreachable, writes queue in `/var/lib/eduroam-probe/pending/` and are retried on the next run.
 
 ### Data layout (InfluxDB bucket `eduroam`)
-- `wifi_scan`: one point per visible BSSID per run. Tags: probe, location, ssid, bssid, ap_group, band, channel. Fields: signal_dbm, channel_util_pct, station_count, wifi_gen.
-- `wifi_test`: one point per tested radio. Tags: probe, location, bssid, ap_group, band, channel, result, fail_stage. Fields: stage timings, DHCP lease details, ping, DNS and HTTP results, link stats, success, fail_reason.
+Three measurements. **[SCHEMA.md](SCHEMA.md) is the full contract** — every tag and
+field with its type and unit — so another system can consume the data without reading
+the agent's code.
+- `wifi_scan`: one point per visible BSSID per run (all SSIDs, passive). Tags include probe, location, ssid, bssid, ap_group, band, channel, vendor_oui, country, security, pmf. Fields include signal_dbm, channel_width_mhz, beacon_interval_tu, supported_max_rate_mbps, station_count, channel_util_pct, ht/vht/he, wifi_gen, and the security flags.
+- `wifi_scan_raw`: the complete, unmodified `iw scan` block for each AP, base64-encoded and keyed by a SHA-256 content hash. Written only when an AP's raw data changes (deduplicated), so nothing the radio reported is lost but the store stays compact. Disable with `CAPTURE_RAW=0`.
+- `wifi_test`: one point per tested eduroam radio. Tags: probe, location, bssid, ap_group, band, channel, result, fail_stage. Fields: stage timings, DHCP lease details, ping, DNS and HTTP results, link stats, success, fail_reason.
 
-`ap_group` is the first five octets of the BSSID, which on most enterprise APs groups a physical AP's radios together.
+`ap_group` is the first five octets of the BSSID, which on most enterprise APs groups a physical AP's radios together. `vendor_oui` is the first three octets (the MAC vendor prefix).
+
+Pull the data back out with the InfluxDB API/Flux, or export annotated CSV with
+`influx query '<flux>' --raw`. To read a raw block on any machine, decode its `raw_b64`
+field with standard base64. See SCHEMA.md for query examples.
 
 ### Triggering a scan from the dashboard
 Grafana can't run commands itself, so a small trigger service does it. Install it on the Pi:
