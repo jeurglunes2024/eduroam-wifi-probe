@@ -18,7 +18,9 @@ Settings come from /etc/eduroam-probe/probe.env and influx.env.
 """
 
 import argparse
+import base64
 import csv
+import hashlib
 import getpass
 import ipaddress
 import json
@@ -39,7 +41,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 ETC = Path("/etc/eduroam-probe")
 DATA = Path("/var/lib/eduroam-probe")
 RUN = Path("/run/eduroam-probe")
@@ -111,6 +113,21 @@ def name_scan(scan, names):
         b["ap_name"] = hit.get("ap_name") or b["ap_group"]
         b["building"] = hit.get("building")
     return scan
+
+
+def load_raw_seen():
+    """Per-BSSID hash of the last raw scan we stored, so we only write on change."""
+    try:
+        return json.loads((DATA / "raw_seen.json").read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def save_raw_seen(seen):
+    try:
+        (DATA / "raw_seen.json").write_text(json.dumps(seen))
+    except OSError:
+        pass
 
 
 def apply_rogue_flags(scan, ssid, cfg):
@@ -204,13 +221,17 @@ def uses_mschapv2(cfg):
 # --------------------------------------------------------------------- parsers
 
 def new_bss(bssid):
-    # _raw_* fields are gathered during parsing; classify_security() reduces
-    # them to the stored security fields and is popped off before writing.
+    # Keys prefixed with _ are parsing scratch; classify_security() derives the
+    # stored fields from them and pops every _ key before the record is written.
     return {"bssid": bssid, "ssid": "", "freq": 0, "signal": None,
             "station_count": None, "channel_util_pct": None, "wifi_gen": "legacy",
+            "beacon_interval_tu": None, "country": None, "ess": None,
+            "ht": False, "vht": False, "he": False,
+            "channel_width_mhz": None, "supported_max_rate_mbps": None,
+            "last_seen_ms": None, "raw_scan": "",
             "_privacy": False, "_has_rsn": False, "_has_wpa1": False, "_wps": False,
             "_rsn_auth": "", "_rsn_pairwise": "", "_rsn_group": "", "_rsn_caps": "",
-            "_wpa_pairwise": ""}
+            "_wpa_pairwise": "", "_raw": [], "_rates": [], "_ht40": False, "_vht_w": None}
 
 
 def classify_security(b):
@@ -284,10 +305,12 @@ def parse_scan(text):
         if m:
             cur = new_bss(m.group(1))
             out.append(cur)
+            cur["_raw"].append(raw)
             section, crypto = None, None
             continue
         if cur is None:
             continue
+        cur["_raw"].append(raw)
         line = raw.strip()
         top_level = raw.startswith("\t") and not raw.startswith("\t\t")
         if top_level:
@@ -308,6 +331,28 @@ def parse_scan(text):
             cur["ssid"] = line[5:].strip()
         elif line.startswith("capability:"):
             cur["_privacy"] = "Privacy" in line
+            cur["ess"] = "ESS" in line
+        elif line.startswith("beacon interval:"):
+            m2 = re.search(r"(\d+)", line)
+            if m2:
+                cur["beacon_interval_tu"] = int(m2.group(1))
+        elif line.startswith("Country:"):
+            parts = line.split()
+            if len(parts) > 1:
+                cur["country"] = parts[1]
+        elif "upported rates:" in line:   # "Supported rates:" and "Extended supported rates:"
+            cur["_rates"] += [float(t.rstrip("*")) for t in re.findall(r"\d+(?:\.\d+)?\*?", line.split(":", 1)[1])]
+        elif section == "HT operation" and "secondary channel offset:" in line and ("above" in line or "below" in line):
+            cur["_ht40"] = True
+        elif section == "VHT operation" and "channel width:" in line:
+            if "160 MHz" in line or "80+80" in line:
+                cur["_vht_w"] = 160
+            elif "80 MHz" in line:
+                cur["_vht_w"] = 80
+            elif "40 MHz" in line:
+                cur["_vht_w"] = 40
+            elif "20 MHz" in line:
+                cur["_vht_w"] = 20
         elif line.startswith("last seen:"):
             m2 = re.search(r"(\d+) ms", line)
             if m2:
@@ -329,14 +374,25 @@ def parse_scan(text):
         elif crypto == "wpa" and "Pairwise ciphers:" in line:
             cur["_wpa_pairwise"] = line.split(":", 1)[1].strip()
         elif line.startswith("HE capabilities"):
-            cur["wifi_gen"] = "ax"
-        elif line.startswith("VHT capabilities") and cur["wifi_gen"] != "ax":
-            cur["wifi_gen"] = "ac"
-        elif line.startswith("HT capabilities") and cur["wifi_gen"] == "legacy":
-            cur["wifi_gen"] = "n"
+            cur["wifi_gen"], cur["he"] = "ax", True
+        elif line.startswith("VHT capabilities"):
+            cur["vht"] = True
+            if cur["wifi_gen"] != "ax":
+                cur["wifi_gen"] = "ac"
+        elif line.startswith("HT capabilities"):
+            cur["ht"] = True
+            if cur["wifi_gen"] == "legacy":
+                cur["wifi_gen"] = "n"
     for b in out:
         b["band"], b["channel"] = freq_to_band_channel(b["freq"])
         b["ap_group"] = ap_group(b["bssid"])
+        if b["_rates"]:
+            b["supported_max_rate_mbps"] = max(b["_rates"])
+        if b["_vht_w"] is not None:
+            b["channel_width_mhz"] = b["_vht_w"]
+        elif b["ht"]:
+            b["channel_width_mhz"] = 40 if b["_ht40"] else 20
+        b["raw_scan"] = "\n".join(b["_raw"])
         classify_security(b)
     return out
 
@@ -848,20 +904,40 @@ def run_cycle(cfg, args, influx):
     apply_rogue_flags(scan, radio.ssid, cfg)
     result["scan"] = scan
     edu = [b for b in scan if b["ssid"] == radio.ssid]
+    raw_seen = load_raw_seen() if cfg.get("CAPTURE_RAW", "1") not in ("0", "false", "no") else None
     for b in scan:
         flags = b["security_flags"].split(",") if b["security_flags"] else []
         lines.append(line("wifi_scan",
                           {"probe": probe_id, "location": location, "ssid": b["ssid"] or "<hidden>",
                            "bssid": b["bssid"], "ap_group": b["ap_group"], "ap_name": b["ap_name"],
                            "building": b["building"], "band": b["band"], "channel": b["channel"],
+                           "vendor_oui": b["bssid"][:8], "country": b["country"],
                            "security": b["security"], "pmf": b["pmf"]},
                           {"signal_dbm": b["signal"], "freq_mhz": b["freq"],
+                           "channel_width_mhz": b["channel_width_mhz"],
+                           "beacon_interval_tu": b["beacon_interval_tu"],
+                           "supported_max_rate_mbps": b["supported_max_rate_mbps"],
                            "station_count": b["station_count"], "channel_util_pct": b["channel_util_pct"],
-                           "wifi_gen": b["wifi_gen"], "wps": b["wps"],
+                           "wifi_gen": b["wifi_gen"], "ht": b["ht"], "vht": b["vht"], "he": b["he"],
+                           "ess": b["ess"], "wps": b["wps"],
                            "security_flags": b["security_flags"] or None,
                            "flag_count": len(flags),
                            "insecure": 1 if flags else 0,
                            "auth_suites": b["auth_suites"]}, now_ms))
+        # Full raw scan per BSSID, base64 so it is one line and decodes on any
+        # machine. Written only when the beacon content changes (dedup by hash),
+        # so the raw store stays compact. See SCHEMA.md.
+        if raw_seen is not None and b["raw_scan"]:
+            digest = hashlib.sha256(b["raw_scan"].encode()).hexdigest()
+            if raw_seen.get(b["bssid"]) != digest:
+                raw_seen[b["bssid"]] = digest
+                lines.append(line("wifi_scan_raw",
+                                  {"probe": probe_id, "location": location, "bssid": b["bssid"],
+                                   "ap_name": b["ap_name"], "content_sha256": digest, "encoding": "base64"},
+                                  {"raw_b64": base64.b64encode(b["raw_scan"].encode()).decode(),
+                                   "raw_len": len(b["raw_scan"])}, now_ms))
+    if raw_seen is not None:
+        save_raw_seen(raw_seen)
     # Co-channel neighbors: how many other BSSIDs (any SSID) share each channel.
     by_chan = {}
     for b in scan:
